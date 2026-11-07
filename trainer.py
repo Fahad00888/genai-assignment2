@@ -278,6 +278,13 @@ class Trainer(object):
             img_forward.append(img)
 
         # visualize backward diffusion process
+        # start from the RAW forward sample at the last visualised step (model space [-1, 1]);
+        # the starter code reused the clamped + rescaled [0, 1] display image here
+        img = self.model.q_sample(
+            data_1,
+            torch.full((data_1.shape[0],), t_visualize[-1], device=data_1.device, dtype=torch.long),
+            data_2,
+        )
         img_backward = []
         for t in range(self.model.num_timesteps - 1, -1, -1):
             img = self.model.p_sample(
