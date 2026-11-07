@@ -201,7 +201,7 @@ class Trainer(object):
                     grid, os.path.join(self.results_folder, f"sample_{milestone}.png"), nrow=6
                 )
 
-                log_dir['img'] = wandb.Image(grid)
+                log_dir['img'] = wandb.Image(grid.detach().cpu())  # convert on CPU: MPS -> uint8 gave black images
 
                 if self.fid:
                     # Make sure the images in the validation set are of the same size
@@ -275,7 +275,7 @@ class Trainer(object):
             )
             img = torch.clamp(img, -1, 1)
             img = (img + 1) / 2
-            img_forward.append(img)
+            img_forward.append(img.detach().cpu())
 
         # visualize backward diffusion process
         # start from the RAW forward sample at the last visualised step (model space [-1, 1]);
@@ -295,7 +295,7 @@ class Trainer(object):
             if t in t_visualize:
                 img_vis = torch.clamp(img, -1, 1)
                 img_vis = (img_vis + 1) / 2
-                img_backward.append(img_vis)
+                img_backward.append(img_vis.detach().cpu())
 
         # Convert forward diffusion batches to grids
         forward_grids = [
@@ -314,6 +314,15 @@ class Trainer(object):
             )
             for batch, t in zip(img_backward, reversed(t_visualize))
         ]
+
+        # also save the figures locally so the report does not depend on wandb
+        for name, batches, ts in (("forward", img_forward, t_visualize),
+                                  ("backward", img_backward, list(reversed(t_visualize)))):
+            for batch, t in zip(batches, ts):
+                print(f"{name} t={t}: min {batch.min():.3f} max {batch.max():.3f}")
+                utils.save_image(batch, os.path.join(self.results_folder, f"{name}_t{t}.png"), nrow=8)
+            strip = torch.cat([utils.make_grid(b, nrow=8, padding=2) for b in batches], dim=2)
+            utils.save_image(strip, os.path.join(self.results_folder, f"{name}_diffusion.png"))
 
         # save the images in wandb
         wandb.log({
