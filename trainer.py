@@ -206,6 +206,10 @@ class Trainer(object):
                 if self.fid:
                     # Make sure the images in the validation set are of the same size
                     self.val_folder = self.train_folder.replace("train", "val")
+                    # compare against real images of the SAME class only (data/val/<class>),
+                    # not all of data/val, which mixes cat, dog and wild
+                    if self.data_class not in (None, "all"):
+                        self.val_folder = os.path.join(self.val_folder, self.data_class)
                     if not os.path.exists(self.val_folder):
                         os.makedirs(self.val_folder, exist_ok=True)
                     if len(os.listdir(self.val_folder)) == 0:
