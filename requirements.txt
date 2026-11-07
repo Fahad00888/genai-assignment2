@@ -5,3 +5,4 @@ wandb
 clean-fid
 tqdm
 pillow
+scipy<1.16  # clean-fid calls linalg.sqrtm(..., disp=False), removed in newer scipy
