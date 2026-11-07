@@ -317,7 +317,7 @@ With $\abar$ precomputed this is a table lookup plus one noise draw: $\bm{O(1)}$
 Run & Question & Settings & Time & Final loss\\
 \midrule
 \texttt{run\_1k} & 6.1 & 1{,}000 steps, sample every 100 & 5 min 23 s & 0.182\\
-\texttt{run\_1k\_fid} & 6.2 & 1{,}000 steps, sample + FID every 100 & \todo{time} & \todo{loss}\\
+\texttt{run\_1k\_fid} & 6.2 & 1{,}000 steps, sample + FID every 100 & 19 min 24 s & 0.184\\
 \texttt{run\_10k} & 6.3--6.5 & 10{,}000 steps, sample every 1{,}000 & 31 min 30 s & 0.159\\
 \bottomrule
 \end{tabular}
@@ -332,7 +332,7 @@ Run & Question & Settings & Time & Final loss\\
 \caption{Per-step L1 loss and its moving average over 1{,}000 training steps.}
 \end{figure}
 
-The loss falls steeply in the first $\sim$200 steps (from about 0.5 to about 0.2) as the network learns the easy part of the task: predicting the noise at large $t$, where $\x_t$ is almost pure noise. After that it flattens around 0.18 with large step-to-step fluctuations. The fluctuations are expected: each step draws a different random timestep per image, and the difficulty varies strongly with $t$ (at small $t$ the added noise is tiny and hard to separate from image detail), so the batch loss is a noisy estimate. Continuing to 10{,}000 steps only lowered the final loss to 0.159, yet the samples improved markedly (Section 6.3), so the loss value alone understates the progress in sample quality. The samples at step 1{,}000 already show recognisable but blurry cat faces, centred and with visible ears and eye positions, and a grey/blue colour cast.
+The loss falls steeply in the first $\sim$200 steps (from 0.85 at the first step to about 0.2) as the network learns the easy part of the task: predicting the noise at large $t$, where $\x_t$ is almost pure noise. After that it flattens, with the 25-step moving average ending at 0.15 while individual steps keep fluctuating noticeably around it. The fluctuations are expected: each step draws a different random timestep per image, and the difficulty varies strongly with $t$ (at small $t$ the added noise is tiny and hard to separate from image detail), so the batch loss is a noisy estimate. Continuing to 10{,}000 steps only lowered the final loss to 0.159, yet the samples improved markedly (Section 6.3), so the loss value alone understates the progress in sample quality. The samples at step 1{,}000 already show recognisable but blurry cat faces, centred and with visible ears and eye positions, and a grey/blue colour cast.
 
 \subsection*{6.2 FID during training}
 
@@ -342,8 +342,26 @@ The loss falls steeply in the first $\sim$200 steps (from about 0.5 to about 0.2
 \caption{FID between 512 generated samples and the 500 real cat images in \texttt{data/val/cat}, every 100 steps.}
 \end{figure}
 
-\todo{Fill in after the FID run: first and last FID values, and where it improves fastest.}
-FID compares the mean and covariance of Inception-v3 features of generated and real images; lower is better. \todo{Describe the trend, e.g. ``FID drops from X at step 100 to Y at step 1{,}000, with the largest improvement in the first N steps, mirroring the loss curve; it is still far from zero because at 1{,}000 steps the samples lack fine detail and colour diversity.''}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcccccccccc@{}}
+\toprule
+step & 100 & 200 & 300 & 400 & 500 & 600 & 700 & 800 & 900 & 1000\\
+\midrule
+FID & 279.3 & 266.6 & 319.4 & 243.8 & 247.5 & 197.9 & 178.5 & 162.3 & 156.3 & \textbf{152.6}\\
+\bottomrule
+\end{tabular}
+\caption{FID every 100 training steps (run \texttt{p1sjl5gm}).}
+\end{table}
+
+FID compares the mean and covariance of Inception-v3 features of generated and real images; lower is better. Over 1{,}000 steps FID falls from 279.3 to \textbf{152.6}, a 45\% reduction, but the path is not monotonic and has two distinct phases:
+\begin{itemize}[nosep]
+\item \textbf{Steps 100--500: noisy, little net progress.} FID moves between 244 and 319, with a clear spike at step 300 (319.4, worse than at step 100). At this stage the samples are still colour blobs with a rough face layout, and each FID value comes from a single snapshot of rapidly changing weights (learning rate $10^{-3}$, no weight averaging), so small changes in the network can shift the colour statistics of all 512 samples at once.
+\item \textbf{Steps 500--1{,}000: steady improvement.} FID drops monotonically, with the largest single gain between steps 500 and 600 ($-49.6$), and then smaller gains ($-19.4$, $-16.2$, $-6.0$, $-3.7$). The shrinking improvements show that progress is slowing, but FID is still falling at step 1{,}000, so the model has not converged.
+\end{itemize}
+The comparison with the loss curve is instructive: the loss has essentially flattened by step $\sim$200, whereas FID only starts improving consistently after step 500. A small further reduction in average noise-prediction error therefore still translates into clearly better samples, and the training loss alone is a poor indicator of sample quality. This matches Section 6.3, where 10{,}000 steps lowered the loss only from 0.182 to 0.159 yet produced much better images.
+
 Absolute values should be read with care: 512 samples is a small set for estimating a $2048$-dimensional covariance, the images are upsampled from $32\times32$ to Inception's $299\times299$ input, and the reference set has only 500 images, so FID here is mainly useful for the \emph{trend}. Using a cat-only reference set (fix 3 above) matters: comparing cats against a cat/dog/wild mixture would keep FID high even for a perfect cat generator.
 
 \subsection*{6.3 Samples after 10{,}000 steps}
