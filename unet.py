@@ -289,26 +289,35 @@ class Unet(nn.Module):
 
         # Downsample path — apply residual/attention blocks and store skip features in `h`.
         for block1, block2, attn, downsample in self.downs:
-            # TODO: Apply the first residual block with time embedding to update `x`. Then, save this first skip feature for the upsampling path.
+            # first residual block (conditioned on time) -> skip #1
+            x = block1(x, t)
+            h.append(x)
 
-            # TODO: Apply the second residual block, followed by attention at this resolution. Again, save the post-attention skip feature.
+            # second residual block + attention -> skip #2
+            x = block2(x, t)
+            x = attn(x)
+            h.append(x)
 
-            # TODO: Downsample `x` for the next resolution level.
+            # halve the resolution (last level: plain conv, same resolution)
+            x = downsample(x)
 
-            pass
+        # Bottleneck at the lowest resolution
+        x = self.mid_block1(x, t)
+        x = self.mid_attn(x)
+        x = self.mid_block2(x, t)
 
-
-        # TODO: Bottleneck — process `x` with mid_block1, mid_attn, and mid_block2 - in order.
-
-        # Upsample path — combine `x` with skips from `h` and restore resolution.
+        # Upsample path — skips are used in reverse order (last saved = first used)
         for block1, block2, attn, upsample in self.ups:
-            # TODO: Concatenate the next skip feature from `h` before the first up block.Then apply the first upsampling residual block with time embedding `t`.
+            x = torch.cat((x, h.pop()), dim=1)   # join channels with matching skip
+            x = block1(x, t)
 
-            # TODO: Concatenate the next skip feature from `h` before the second up block.Then, apply the second upsampling residual block.
-            
-            # TODO: Apply attention at this resolution and upsample `x` to the next higher resolution.
-            
-            pass
+            x = torch.cat((x, h.pop()), dim=1)
+            x = block2(x, t)
+
+            x = attn(x)
+            x = upsample(x)                      # double the resolution
+
+        assert len(h) == 0, "every saved skip feature should be used exactly once"
 
         x = torch.cat((x, r), dim = 1)
 
