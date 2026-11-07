@@ -76,12 +76,35 @@ class Diffusion(nn.Module):
             channels: The number of channels in the images.
             timesteps: The number of timesteps for the diffusion process.
         """
-        ## TODO: Implement the initialization of the diffusion process ##
-        # Pre-compute the coefficients for the diffusion process using scheduler
-        # Hint: helpful to define both alpha_bar and alpha_bar_t_minus_1
-        # Hint: at t = 0, alpha_bar = 1
-        # Hint: what does PyTorch register_buffer do?
-        pass
+        # ---- Noise schedule (Eq. 14), indexed t = 0 .. T-1 ----
+        alpha = cosine_schedule(self.num_timesteps)              # alpha_t
+        alpha_bar = torch.cumprod(alpha, dim=0)                   # \bar{alpha}_t = prod_{i<=t} alpha_i
+        # \bar{alpha}_{t-1}: shift right by one and put 1 at t = 0 (no noise before the first step)
+        alpha_bar_prev = torch.cat([torch.ones(1), alpha_bar[:-1]])
+
+        # Buffers move with .to(device) and are saved in state_dict,
+        # but they are NOT trainable parameters.
+        def keep(name, value):
+            self.register_buffer(name, value.float())
+
+        keep("alpha", alpha)
+        keep("alpha_bar", alpha_bar)
+        keep("alpha_bar_prev", alpha_bar_prev)
+
+        # Forward process, Eq. 13: x_t = sqrt(abar_t) x_0 + sqrt(1 - abar_t) eps
+        keep("signal_scale", torch.sqrt(alpha_bar))
+        keep("noise_scale", torch.sqrt(1.0 - alpha_bar))
+
+        # Posterior q(x_{t-1} | x_t, x_0), Eq. 18 / Alg. 2 lines 7-8
+        #   mean = coef_xt * x_t + coef_x0 * x0_hat
+        #   var  = (1 - abar_{t-1}) / (1 - abar_t) * (1 - alpha_t)
+        keep("coef_xt", torch.sqrt(alpha) * (1.0 - alpha_bar_prev) / (1.0 - alpha_bar))
+        keep("coef_x0", torch.sqrt(alpha_bar_prev) * (1.0 - alpha) / (1.0 - alpha_bar))
+        keep("posterior_std", torch.sqrt((1.0 - alpha_bar_prev) / (1.0 - alpha_bar) * (1.0 - alpha)))
+
+    def _at(self, name, t, x):
+        """Shortcut: pick schedule `name` at timesteps t, shaped to broadcast with x."""
+        return gather_timestep_coeff(getattr(self, name), t, x.shape)
     
     ##############################################
     # FORWARD DIFFUSION    
@@ -98,10 +121,11 @@ class Diffusion(nn.Module):
         Returns:
             The sampled images.
         """
-        ##### TODO: Implement the q_sample function #######
-        # x_t = ...
-        # return x_t 
-        
+        # Eq. 13: jump straight from x_0 to x_t in one step (closed form, O(1) in t)
+        x_t = self._at("signal_scale", t, x_0) * x_0 + self._at("noise_scale", t, x_0) * noise
+        return x_t
+
+
     def p_losses(self, x_0, t, noise):
         """
         Computes the loss for the forward diffusion.
@@ -112,10 +136,11 @@ class Diffusion(nn.Module):
         Returns:
             The computed loss.
         """
-        ###### TODO: Implement the p_losses function #######
-        # define loss function wrt. the model output and the target
-        # Hint: you can use pytorch built-in loss functions: F.l1_loss
-
+        # Alg. 1 lines 5-6: noise the image, ask the U-Net which noise was added,
+        # and penalise the L1 distance between true and predicted noise.
+        x_t = self.q_sample(x_0, t, noise)
+        predicted_noise = self.model(x_t, t)
+        loss = F.l1_loss(predicted_noise, noise)
         return loss
     
     def forward(self, x_0, noise):
@@ -129,8 +154,9 @@ class Diffusion(nn.Module):
         """
         b, c, h, w, device, img_size, = *x_0.shape, x_0.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
-        ##### TODO: Implement the forward function ########
-        pass
+        # Alg. 1 line 3: one random timestep per image, t ~ Uniform{0, ..., T-1}
+        t = torch.randint(0, self.num_timesteps, (b,), device=device, dtype=torch.long)
+        return self.p_losses(x_0, t, noise)
 
     ############################################################
     # BACKWARD DIFFUSION
@@ -164,11 +190,21 @@ class Diffusion(nn.Module):
         # sample x_{t-1} from the gaussian distribution wrt. posterior mean and posterior variance
         # Hint: use gather_timestep_coeff function to get the coefficients at time t
         # Hint: use self.noise_like function to generate noise. DO NOT USE torch.randn
-        # Begin code here
+        # Alg. 2 line 4: predicted noise
+        eps = self.model(x, t)
+        # Alg. 2 lines 5-6: estimate the clean image (Eq. 19) and keep it in [-1, 1]
+        x0_hat = (x - self._at("noise_scale", t, x) * eps) / self._at("signal_scale", t, x)
+        x0_hat = torch.clamp(x0_hat, -1.0, 1.0)
+        # Alg. 2 line 7: posterior mean
+        mean = self._at("coef_xt", t, x) * x + self._at("coef_x0", t, x) * x0_hat
+
         if t_index == 0:
-            pass
+            # last step: z = 0, return the mean without adding noise
+            return mean
         else:
-            pass
+            # Alg. 2 lines 3, 8-9: add scaled Gaussian noise
+            z = self.noise_like(x.shape, x.device)
+            return mean + self._at("posterior_std", t, x) * z
 
     @torch.no_grad()
     def p_sample_loop(self, img):
@@ -186,6 +222,11 @@ class Diffusion(nn.Module):
         # 2. inside the loop, sample x_{t-1} from the reverse diffusion process
         # 3. clamp and unnormalize the generated image to valid pixel range
         # Hint: to get time index, you can use torch.full()
+        for step in range(self.num_timesteps - 1, -1, -1):          # T-1, ..., 0
+            t = torch.full((b,), step, device=img.device, dtype=torch.long)
+            img = self.p_sample(img, t, step)
+        # back from [-1, 1] model space to [0, 1] pixel space
+        img = unnormalize_to_zero_to_one(torch.clamp(img, -1.0, 1.0))
         return img
 
     @torch.no_grad()
@@ -199,5 +240,8 @@ class Diffusion(nn.Module):
         """
         #### TODO: Implement the sample function ####
         # Hint: use self.noise_like function to generate noise. DO NOT USE torch.randn
+        # Alg. 2 line 1: start from pure Gaussian noise x_{T-1} ~ N(0, I)
+        shape = (batch_size, self.channels, self.image_size, self.image_size)
+        img = self.noise_like(shape, self.alpha.device)
         return self.p_sample_loop(img)
         # ####################################################
