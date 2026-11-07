@@ -405,8 +405,14 @@ This matches the figure: at $t=0$ the cats are unchanged; at $t=12$ they are cle
 \caption{Reverse process of the 10k-step model, started from the $t=49$ forward images, shown at $t=49,37,25,12,0$, left to right.}
 \end{figure}
 
-\todo{Check these sentences against your figure and adjust.}
-Starting from the noisy $\x_{49}$ of the forward process, the model removes noise step by step. Early on (from $t=49$ to $t=37$) only low-frequency blobs of colour and brightness emerge; by $t=25$ the face layout (head outline, position of eyes and ears) is set; the last steps ($t=12\to0$) add fine detail and sharpen edges. Coarse structure is decided first and detail last, mirroring the forward process in reverse. Note that the final images are \emph{new} cats rather than reconstructions of the original batch: at $t=49$ we have $\sqrt{\abar_{49}}\approx0.001$, so essentially no information about the original images is left, and the reverse process samples a fresh image from the learned distribution.
+Starting from the noisy $\x_{49}$ of the forward process, the model removes noise one step at a time. Reading the figure left to right:
+\begin{itemize}[nosep]
+\item $t=49$ and $t=37$: both panels still look like pure noise; the first reverse steps only adjust low-frequency colour and brightness, which is hidden under the large remaining noise ($\sqrt{1-\abar_{37}}\approx0.93$).
+\item $t=25$: faint cat silhouettes start to appear under the noise (dark and light regions where the head and ears will be).
+\item $t=12$: the cats are clearly recognisable, with face layout, ears and fur colours decided, but still covered in grain.
+\item $t=0$: clean, sharp cat faces with natural and diverse colours.
+\end{itemize}
+Two observations. First, the backward panels look like the forward panels in mirror order: at each shown $t$, the reverse image has about the same visible noise level as the forward image at that $t$. This is what a well-trained model should do, since the reverse chain is trained so that its intermediate $\x_t$ follow the same marginals $q(\x_t)$ as the forward chain. Coarse structure is decided in the middle of the chain and fine detail in the last steps. Second, the final images are \emph{new} cats, not reconstructions of the original batch shown in Section 6.4 (compare the first rows of the two figures): at $t=49$ we have $\sqrt{\abar_{49}}\approx0.001$, so essentially no information about the original images is left, and the reverse process samples fresh images from the learned distribution.
 
 \section*{Reproducibility}
 
