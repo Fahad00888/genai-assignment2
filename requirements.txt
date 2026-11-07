@@ -1,0 +1,7 @@
+torch
+torchvision
+einops
+wandb
+clean-fid
+tqdm
+pillow
