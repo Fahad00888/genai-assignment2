@@ -41,12 +41,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
 
-    if args.visualize:
-        if args.load_path is None:
+    args_dict = vars(args)
+    do_visualize = args_dict.pop('visualize')
+
+    if do_visualize:
+        if args_dict['load_path'] is None:
             print("No model to visualize, Please provide a load path.")
             exit(0)
-        visualize_diffusion(vars(args))
+        # fixed: arguments must be unpacked with ** (starter code passed the dict positionally)
+        visualize_diffusion(**args_dict)
     else:
-        args_dict = vars(args)
-        args_dict.pop('visualize')
         train_diffusion(**args_dict)
